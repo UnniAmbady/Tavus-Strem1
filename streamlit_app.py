@@ -5,7 +5,6 @@ from datetime import datetime
 
 # ===================== Config / secrets =====================
 # Expect these in .streamlit/secrets.toml
-
 TAVUS_API_KEY    = st.secrets["tavus"]["api_key"]
 TAVUS_PERSONA_ID = st.secrets["tavus"]["persona_id"]
 TAVUS_REPLICA_ID = st.secrets["tavus"]["replica_id"]
