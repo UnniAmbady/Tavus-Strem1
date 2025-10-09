@@ -43,35 +43,69 @@ ss.setdefault("conv_url", None)
 st.markdown(
     """
     <style>
+      :root{
+        /* soft radii + spacing that work on phones */
+        --rad: 12px;
+        --gap: 12px;
+      }
+
       .app-wrapper { max-width: 480px; margin: 0 auto; }
 
-      .btn-row { display: flex; gap: 10px; width: 100%; margin: 6px 0 10px 0; }
-      .btn-row > div { flex: 1; }
-      .btn-start button, .btn-join button {
-        padding: 6px 10px !important;
-        font-size: 14px !important;
+      /* ---- Buttons row: tiny, centered left/right ---- */
+      .btn-row{
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: var(--gap);
+        margin: 8px 0 12px 0;
+      }
+      .btn-chip { display: inline-flex; }
+
+      /* Make Streamlit buttons look like compact "chips" */
+      .btn-chip button{
+        padding: 6px 14px !important;      /* small, just enough for text */
+        font-size: 15px !important;
         line-height: 1.1 !important;
-        border-radius: 10px !important;
-        border: none !important;
+        border-radius: 999px !important;    /* pill */
+        border: 1px solid rgba(0,0,0,0.08) !important;
+        min-width: 96px;                    /* keeps both readable */
       }
-      .btn-start button { background: #ffc9c9 !important; color: #7a0000 !important; }  /* light red */
-      .btn-join  button { background: #c8f7d0 !important; color: #0c5c2a !important; }  /* light green */
+      .btn-start button { background: #ffe3e3 !important; color: #6d0000 !important; } /* light red */
+      .btn-join  button { background: #dbffe6 !important; color: #0c5c2a  !important; } /* light green */
 
-      /* Make the iframe look like a card without any black placeholder */
-      .room-frame {
+      /* ---- Video container (Tavus room) ----
+         - Use aspect-ratio on desktop
+         - On small phones, use a vh-based height so controls fit */
+      .room-frame{
         width: 100%;
-        height: 68vh;         /* good on phones; shows full room */
-        max-height: 540px;    /* cap for larger screens */
         border: 0;
-        border-radius: 12px;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+        border-radius: var(--rad);
+        box-shadow: 0 4px 14px rgba(0,0,0,0.22);
         overflow: hidden;
+        display: block;
+        aspect-ratio: 16/9;        /* nice on desktop */
+        height: auto;
       }
 
+      /* Spacing below the iframe so the page UI never crowds the room's own control bar */
+      .below-room-spacer{
+        height: max(16px, env(safe-area-inset-bottom, 0px));
+      }
+
+      /* ---- Mobile tuning ---- */
       @media (max-width: 600px){
         header[data-testid="stHeader"] { height: 0; min-height: 0; }
         header[data-testid="stHeader"] * { display: none; }
-        .block-container { padding-top: 0 !important; }
+        .block-container { padding-top: 6px !important; }
+
+        /* Use a fixed vh height for the iframe on phones so nothing feels cramped.
+           Leave extra space so the room's bottom controls are fully visible. */
+        .room-frame{
+          aspect-ratio: auto;
+          height: calc(56vh - env(safe-area-inset-top, 0px));
+          max-height: 420px;
+          margin-bottom: 10px;
+        }
       }
     </style>
     """,
@@ -89,18 +123,16 @@ st.info(
     icon="🔐",
 )
 
-# Buttons (enabled by default)
+# Small centered buttons (chip style)
 st.markdown('<div class="btn-row">', unsafe_allow_html=True)
-c1, c2 = st.columns(2)
-with c1:
-    st.markdown('<div class="btn-start">', unsafe_allow_html=True)
-    start_clicked = st.button("Start", key="btn_start", use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-with c2:
-    st.markdown('<div class="btn-join">', unsafe_allow_html=True)
-    join_clicked = st.button("Join", key="btn_join", use_container_width=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-st.markdown("</div>", unsafe_allow_html=True)
+st.markdown('<div class="btn-chip btn-start">', unsafe_allow_html=True)
+start_clicked = st.button("Start", key="btn_start")
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.markdown('<div class="btn-chip btn-join">', unsafe_allow_html=True)
+join_clicked = st.button("Join", key="btn_join")
+st.markdown('</div>', unsafe_allow_html=True)
+st.markdown('</div>', unsafe_allow_html=True)  # end .btn-row
 
 # Handlers
 if start_clicked:
@@ -121,17 +153,19 @@ if join_clicked and not ss.get("conv_url"):
     except Exception as e:
         st.error(f"Failed to join: {e}")
 
-# ===================== Single video area (only the Tavus room) =====================
+# ===================== Single video area (Tavus room only) =====================
 if ss.get("conv_url"):
-    # Render the Tavus room directly, no black background wrapper.
     st.components.v1.html(
-        f'<iframe src="{ss["conv_url"]}" class="room-frame" allow="camera; microphone; clipboard-read; clipboard-write"></iframe>',
-        height=540,  # matches max-height for stable layout
+        f'<iframe src="{ss["conv_url"]}" class="room-frame" '
+        'allow="camera; microphone; clipboard-read; clipboard-write"></iframe>',
+        height=540,   # desktop; overridden by CSS on phones
     )
+    # Spacer to guarantee the page UI sits below the room's own control bar on phones
+    st.markdown('<div class="below-room-spacer"></div>', unsafe_allow_html=True)
 else:
     st.info("Tap Start or Join to begin the session.")
 
-# Optional End button
+# End button (single, centered)
 if ss.get("conv_id"):
     if st.button("End", use_container_width=True):
         end_conversation(ss["conv_id"])
