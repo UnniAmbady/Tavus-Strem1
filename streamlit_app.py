@@ -2,13 +2,17 @@ import requests
 import streamlit as st
 from datetime import datetime
 
-# ========== Config / secrets ==========
+# ===================== Config / secrets =====================
 # .streamlit/secrets.toml
+# [tavus]
+# api_key = "..."
+# persona_id = "..."
+# replica_id = "..."
 TAVUS_API_KEY    = st.secrets["tavus"]["api_key"]
 TAVUS_PERSONA_ID = st.secrets["tavus"]["persona_id"]
 TAVUS_REPLICA_ID = st.secrets["tavus"]["replica_id"]
 
-# ========== Tavus helpers ==========
+# ===================== Tavus helpers =====================
 def create_conversation():
     url = "https://tavusapi.com/v2/conversations"
     payload = {
@@ -32,33 +36,20 @@ def end_conversation(conversation_id: str):
     except Exception:
         pass
 
-# ========== Page setup ==========
+# ===================== Page setup =====================
 st.set_page_config(page_title="Interactive Avatar", page_icon="🎥", layout="centered")
 
-# Session
 ss = st.session_state
 ss.setdefault("conv_id", None)
 ss.setdefault("conv_url", None)
 
-# ========== Styles ==========
+# ===================== Styles =====================
 st.markdown(
     """
     <style>
       .app-wrapper { max-width: 480px; margin: 0 auto; }
-      .video-stack { width: 100%; }
-      .slot {
-        width: 100%;
-        height: 42vh;                 /* two equal blocks fit on one phone screen */
-        max-height: 360px;             /* cap for bigger phones */
-        background: #000;
-        border-radius: 12px;
-        overflow: hidden;
-        box-shadow: 0 4px 14px rgba(0,0,0,0.25);
-      }
-      .btn-row { display: flex; gap: 10px; width: 100%; margin-top: 2px; }
+      .btn-row { display: flex; gap: 10px; width: 100%; margin: 6px 0 10px 0; }
       .btn-row > div { flex: 1; }
-
-      /* Compact, light colors */
       .btn-start button, .btn-join button {
         padding: 6px 10px !important;
         font-size: 14px !important;
@@ -68,6 +59,17 @@ st.markdown(
       }
       .btn-start button { background: #ffc9c9 !important; color: #7a0000 !important; }  /* light red */
       .btn-join  button { background: #c8f7d0 !important; color: #0c5c2a !important; }  /* light green */
+
+      /* One single video container (Tavus room) */
+      .room {
+        width: 100%;
+        height: 68vh;          /* single viewport block that fits on phones */
+        max-height: 540px;     /* cap for larger devices */
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+        background: #000;      /* just in case iframe loads slowly */
+      }
 
       @media (max-width: 600px){
         header[data-testid="stHeader"] { height: 0; min-height: 0; }
@@ -79,11 +81,11 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ========== UI ==========
+# ===================== UI =====================
 st.markdown('<div class="app-wrapper">', unsafe_allow_html=True)
 st.title("Interactive Avatar")
 
-# Static guidance (no modal)
+# Static info (no popup)
 st.info(
     "Permissions needed\n\nPlease allow **Microphone** access to continue. "
     "We will then ask for **Camera** (optional).",
@@ -122,38 +124,14 @@ if join_clicked and not ss.get("conv_url"):
     except Exception as e:
         st.error(f"Failed to join: {e}")
 
-# ========== Video stack ==========
-st.markdown('<div class="video-stack">', unsafe_allow_html=True)
-
-# Top: Avatar (Tavus)
-st.markdown('<div class="slot">', unsafe_allow_html=True)
+# ===================== Single video area (only the Tavus room) =====================
+st.markdown('<div class="room">', unsafe_allow_html=True)
 if ss.get("conv_url"):
-    st.components.v1.iframe(ss["conv_url"], height=360, scrolling=False)
+    # The Tavus room already shows both the Avatar and your camera together.
+    st.components.v1.iframe(ss["conv_url"], height=540, scrolling=False)
 else:
     st.info("Tap Start or Join to begin the session.")
-st.markdown("</div>", unsafe_allow_html=True)
-
-# Bottom: User camera preview (silent attempt; black if blocked/denied)
-st.markdown('<div class="slot" style="margin-top: 10px;">', unsafe_allow_html=True)
-cam_html = """
-<video id="me" autoplay playsinline muted style="width:100%; height:100%; object-fit: cover; background:#000;"></video>
-<script>
-(async () => {
-  try {
-    // Try to get video; if user denies or browser blocks, we simply keep black screen.
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-    const v = document.getElementById('me');
-    if (v) v.srcObject = stream;
-  } catch (e) {
-    // Keep black screen silently for prototype testing.
-  }
-})();
-</script>
-"""
-st.components.v1.html(cam_html, height=360)
-st.markdown("</div>", unsafe_allow_html=True)
-
-st.markdown("</div>", unsafe_allow_html=True)  # .video-stack
+st.markdown('</div>', unsafe_allow_html=True)
 
 # Optional End button
 if ss.get("conv_id"):
