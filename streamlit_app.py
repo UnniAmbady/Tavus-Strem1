@@ -1,17 +1,12 @@
-import io
 import json
-import time
 import requests
 import streamlit as st
 from datetime import datetime
-from openai import OpenAI
 
-# --------- Config / secrets ----------
-
+# ============ Config / secrets ============
 TAVUS_API_KEY    = st.secrets["tavus"]["api_key"]
 TAVUS_PERSONA_ID = st.secrets["tavus"]["persona_id"]
 TAVUS_REPLICA_ID = st.secrets["tavus"]["replica_id"]
-OPENAI_API_KEY   = st.secrets["openai"]["secret_key"] 
 
 # Optional: override if Tavus changes the interactions route
 TAVUS_INTERACTIONS_URL = st.secrets.get(
@@ -19,7 +14,7 @@ TAVUS_INTERACTIONS_URL = st.secrets.get(
     "https://tavusapi.com/v2/interactions/broadcast"
 )
 
-# --------- Helpers ----------
+# ============ API helpers ============
 def create_conversation():
     """Create a real-time CVI conversation and return id + embed URL."""
     url = "https://tavusapi.com/v2/conversations"
@@ -27,7 +22,6 @@ def create_conversation():
         "persona_id": TAVUS_PERSONA_ID,
         "replica_id": TAVUS_REPLICA_ID,
         "conversation_name": f"Streamlit-{datetime.utcnow().isoformat(timespec='seconds')}Z"
-        # You can also pass callback_url, conversational_context, etc.
     }
     r = requests.post(
         url, json=payload,
@@ -43,13 +37,10 @@ def end_conversation(conversation_id: str):
     requests.post(url, headers={"x-api-key": TAVUS_API_KEY}, timeout=15)
 
 def broadcast_echo(conversation_id: str, text: str):
-    """
-    Tell the replica exactly what to say (Echo Interaction).
-    If your account uses a different route, set TAVUS_INTERACTIONS_URL in secrets.
-    """
+    """Optional: If you later want to drive the avatar to say exact text."""
     payload = {
-        "message_type": "conversation",          # per Interactions Protocol
-        "event_type": "conversation.echo",       # Echo Interaction
+        "message_type": "conversation",
+        "event_type": "conversation.echo",
         "conversation_id": conversation_id,
         "properties": {"text": text}
     }
@@ -59,110 +50,223 @@ def broadcast_echo(conversation_id: str, text: str):
         data=json.dumps(payload),
         timeout=30,
     )
-    # If your tenant uses a different path, surface the error in the UI
     if r.status_code >= 400:
         st.error(f"Echo broadcast failed ({r.status_code}): {r.text}")
 
-def openai_transcribe_wav(wav_bytes: bytes) -> str:
-    """Transcribe mic audio with OpenAI Whisper."""
-    url = "https://api.openai.com/v1/audio/transcriptions"
-    files = {
-        "file": ("audio.wav", wav_bytes, "audio/wav"),
+# ============ Page setup ============
+st.set_page_config(page_title="Interactive Avatar", page_icon="🎥", layout="centered")
+
+# Session defaults
+ss = st.session_state
+ss.setdefault("mic_granted", False)
+ss.setdefault("cam_granted", False)
+ss.setdefault("conv_id", None)
+ss.setdefault("conv_url", None)
+ss.setdefault("permission_checked", False)
+
+# Read permission flags if set via query params by the popup component
+qp = st.query_params
+if "mic" in qp:
+    ss.mic_granted = qp.get("mic", "") == "granted"
+if "cam" in qp:
+    ss.cam_granted = qp.get("cam", "") == "granted"
+if "checked" in qp:
+    ss.permission_checked = qp.get("checked", "") == "1"
+
+# ============ Title ============
+st.markdown(
+    """
+    <style>
+      /* Keep everything comfortably mobile-friendly */
+      .app-wrapper { max-width: 480px; margin: 0 auto; }
+      .video-stack { width: 100%; }
+      .slot {
+        width: 100%;
+        height: 42vh;               /* two equal blocks fit in one phone screen */
+        max-height: 360px;           /* cap on larger phones */
+        background: #000;            /* black if no video */
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+      }
+      .btn-row { display: flex; gap: 12px; width: 100%; }
+      .btn-row > div { flex: 1; }
+      .btn-start button { background: #d40000 !important; color: #fff !important; border: none !important; }
+      .btn-join  button { background: #12a150 !important; color: #fff !important; border: none !important; }
+      .disabled button { filter: grayscale(100%); opacity: 0.6; pointer-events: none; }
+      /* Hide Streamlit's top-toolbar on small screens for more room */
+      @media (max-width: 600px){
+        header[data-testid="stHeader"] { height: 0; min-height: 0; }
+        header[data-testid="stHeader"] * { display: none; }
+        .block-container { padding-top: 0 !important; }
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown('<div class="app-wrapper">', unsafe_allow_html=True)
+st.title("Interactive Avatar")
+
+# ============ Permission popup (JS) ============
+# This component shows a modal-like popup, asks for mic first, then camera.
+# It writes results back through URL query parameters and reloads the page.
+permission_popup_html = """
+<div id="perm-modal" style="
+  position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+  display: flex; align-items: center; justify-content: center; z-index: 9999;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;">
+  <div style="background: white; width: 92%; max-width: 360px; padding: 18px 16px; border-radius: 12px;">
+    <h3 style="margin: 0 0 8px 0;">Permissions needed</h3>
+    <p style="margin: 0 0 10px 0;">To continue, please allow <b>Microphone</b> access. We'll then ask for <b>Camera</b> access (optional).</p>
+    <button id="go" style="width:100%; padding: 10px 12px; border: none; border-radius: 8px; font-weight: 600; cursor: pointer;">
+      Continue
+    </button>
+  </div>
+</div>
+<script>
+(async () => {
+  const btn = document.getElementById('go');
+  if (!btn) return;
+  btn.onclick = async () => {
+    let mic = 'denied', cam = 'denied';
+    try {
+      // Ask MIC first
+      await navigator.mediaDevices.getUserMedia({audio: true});
+      mic = 'granted';
+    } catch (e) {
+      mic = 'denied';
     }
-    data = {"model": "whisper-1"}  # simple & widely supported
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}"}
-    r = requests.post(url, headers=headers, files=files, data=data, timeout=60)
-    r.raise_for_status()
-    return r.json()["text"]
-
-def openai_chat(prompt: str, history: list[dict]) -> str:
-    """Call ChatGPT (Chat Completions) with a short running history."""
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
-    messages = [{"role": "system", "content": "You are a concise, friendly assistant."}]
-    messages += history
-    messages.append({"role": "user", "content": prompt})
-
-    payload = {
-        "model": "gpt-4o-mini",   # use any chat-capable model on your account
-        "messages": messages,
-        "temperature": 0.7,
+    if (mic === 'granted') {
+      // Then ask CAM
+      try {
+        const s = await navigator.mediaDevices.getUserMedia({video: true});
+        // Stop tracks immediately; we only needed permission probe here.
+        s.getTracks().forEach(t => t.stop());
+        cam = 'granted';
+      } catch (e) {
+        cam = 'denied';
+      }
     }
-    r = requests.post(url, headers=headers, json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()["choices"][0]["message"]["content"]
 
-# --------- UI ----------
-st.set_page_config(page_title="Interactive Avatar (Tavus + ChatGPT)", layout="wide")
-st.title("🎥 Tavus Interactive Avatar + ChatGPT (Streamlit)")
+    // Write query params and reload
+    const url = new URL(window.location.href);
+    url.searchParams.set('mic', mic);
+    url.searchParams.set('cam', cam);
+    url.searchParams.set('checked', '1');
+    window.location.replace(url.toString());
+  };
+})();
+</script>
+"""
 
-with st.sidebar:
-    st.subheader("Session")
-    start = st.button("Start / Restart Session", type="primary")
-    stop = st.button("End Session")
-    st.markdown("—")
-    st.caption("Mic ▶️ Speak below, then send:")
-    mic = st.audio_input("Push-to-talk", key="mic")  # native Streamlit widget
-    text_fallback = st.chat_input("Or type your message…")
+# ============ Controls ============
+# Buttons are disabled if mic permission not granted (as requested).
+btn_container = st.container()
+with btn_container:
+    st.markdown('<div class="btn-row">', unsafe_allow_html=True)
 
-if "conv_id" not in st.session_state or start:
-    # Start a new real-time call
+    c1, c2 = st.columns(2)
+    with c1:
+        start_disabled = not ss.mic_granted
+        start_classes = "btn-start" + (" disabled" if start_disabled else "")
+        st.markdown(f'<div class="{start_classes}">', unsafe_allow_html=True)
+        start_clicked = st.button("Start", key="btn_start", disabled=start_disabled, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+    with c2:
+        join_disabled = not ss.mic_granted
+        join_classes = "btn-join" + (" disabled" if join_disabled else "")
+        st.markdown(f'<div class="{join_classes}">', unsafe_allow_html=True)
+        join_clicked = st.button("Join", key="btn_join", disabled=join_disabled, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# If user hasn’t checked permissions yet (first load or they dismissed), show popup.
+if not ss.permission_checked:
+    st.components.v1.html(permission_popup_html, height=180)
+
+# Handle Start/Join
+if start_clicked:
+    # (Re)start conversation
+    try:
+        if ss.conv_id:
+            end_conversation(ss.conv_id)
+    except Exception:
+        pass
     try:
         conv_id, conv_url = create_conversation()
-        st.session_state["conv_id"] = conv_id
-        st.session_state["conv_url"] = conv_url
-        st.session_state.setdefault("chat", [])
-        st.toast("Conversation started.")
+        ss.conv_id = conv_id
+        ss.conv_url = conv_url
+        st.toast("Session started.")
     except Exception as e:
         st.error(f"Failed to create conversation: {e}")
 
-if stop and st.session_state.get("conv_id"):
-    end_conversation(st.session_state["conv_id"])
-    for k in ("conv_id", "conv_url"):
-        st.session_state.pop(k, None)
-    st.toast("Conversation ended.")
+if join_clicked and not ss.conv_url:
+    # If Join pressed before a session exists, create one implicitly
+    try:
+        conv_id, conv_url = create_conversation()
+        ss.conv_id = conv_id
+        ss.conv_url = conv_url
+        st.toast("Joined session.")
+    except Exception as e:
+        st.error(f"Failed to join/create conversation: {e}")
 
-left, right = st.columns([0.55, 0.45])
+# ============ Video stack ============
+# Top: Avatar (Tavus room) — always shown once session exists
+# Bottom: User camera if granted; otherwise black screen.
+top = st.container()
+bottom = st.container()
 
-with left:
-    st.subheader("Live Avatar")
-    if st.session_state.get("conv_url"):
-        # Embed the conversation room (WebRTC) – user will grant mic/cam in the iframe.
-        st.components.v1.iframe(st.session_state["conv_url"], height=560)
+with top:
+    st.markdown('<div class="video-stack">', unsafe_allow_html=True)
+    st.markdown('<div class="slot">', unsafe_allow_html=True)
+    if ss.conv_url:
+        # Embed the Tavus conversation room (WebRTC).
+        # Permissions will also be requested inside the iframe by the room itself.
+        st.components.v1.iframe(ss.conv_url, height=360, scrolling=False)
     else:
-        st.info("Start a session to get the live avatar embed.")
+        st.info("Tap Start or Join to begin the session.")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-with right:
-    st.subheader("Chat Log")
-    for role, content in st.session_state.get("chat", []):
-        st.chat_message(role).write(content)
+with bottom:
+    st.markdown('<div class="slot" style="margin-top: 10px;">', unsafe_allow_html=True)
+    if ss.cam_granted:
+        # Lightweight inline camera preview (client-side only)
+        cam_html = """
+        <video id="me" autoplay playsinline muted style="width:100%; height:100%; object-fit: cover; background:#000;"></video>
+        <script>
+        (async () => {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({video:true, audio:false});
+            const v = document.getElementById('me');
+            if (v) v.srcObject = stream;
+          } catch (e) {
+            // If user revokes afterward, keep black screen.
+          }
+        })();
+        </script>
+        """
+        st.components.v1.html(cam_html, height=360)
+    else:
+        # Black box reserved for user video (per requirement)
+        st.markdown(
+            '<div style="width:100%; height:100%; background:#000;"></div>',
+            unsafe_allow_html=True
+        )
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # 1) If mic audio provided, transcribe it
-    user_text = None
-    if mic is not None:
+# Optional: small footer actions
+end_col = st.container()
+with end_col:
+    if ss.conv_id and st.button("End", use_container_width=True):
         try:
-            user_text = openai_transcribe_wav(mic.getvalue())
-        except Exception as e:
-            st.error(f"Transcription failed: {e}")
+            end_conversation(ss.conv_id)
+        except Exception:
+            pass
+        for k in ("conv_id", "conv_url"):
+            ss.pop(k, None)
+        st.toast("Session ended.")
 
-    # 2) Or typed text
-    if text_fallback:
-        user_text = text_fallback
-
-    # 3) Send to ChatGPT, then tell Tavus to speak the reply
-    if user_text and st.session_state.get("conv_id"):
-        st.session_state["chat"].append(("user", user_text))
-        st.chat_message("user").write(user_text)
-
-        try:
-            reply = openai_chat(user_text, [
-                {"role": r, "content": c} for r, c in st.session_state["chat"]
-            ])
-            st.session_state["chat"].append(("assistant", reply))
-            st.chat_message("assistant").write(reply)
-
-            # Make the avatar say exactly the ChatGPT text
-            broadcast_echo(st.session_state["conv_id"], reply)
-        except Exception as e:
-            st.error(f"Chat or echo failed: {e}")
-
+st.markdown('</div>', unsafe_allow_html=True)
