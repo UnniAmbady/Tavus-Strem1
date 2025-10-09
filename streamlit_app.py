@@ -129,8 +129,8 @@ st.markdown('<div class="btn-chip btn-start">', unsafe_allow_html=True)
 start_clicked = st.button("Start", key="btn_start")
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="btn-chip btn-join">', unsafe_allow_html=True)
-join_clicked = st.button("Join", key="btn_join")
+#st.markdown('<div class="btn-chip btn-join">', unsafe_allow_html=True)
+#join_clicked = st.button("Join", key="btn_join")
 st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)  # end .btn-row
 
@@ -144,7 +144,7 @@ if start_clicked:
         st.toast("Session started.")
     except Exception as e:
         st.error(f"Failed to start: {e}")
-
+"""
 if join_clicked and not ss.get("conv_url"):
     try:
         conv_id, conv_url = create_conversation()
@@ -152,7 +152,7 @@ if join_clicked and not ss.get("conv_url"):
         st.toast("Joined session.")
     except Exception as e:
         st.error(f"Failed to join: {e}")
-
+"""
 # ===================== Single video area (Tavus room only) =====================
 if ss.get("conv_url"):
     st.components.v1.html(
