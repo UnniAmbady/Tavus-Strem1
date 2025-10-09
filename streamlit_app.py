@@ -4,7 +4,8 @@ import streamlit as st
 from datetime import datetime
 
 # ===================== Config / secrets =====================
-# Replace these with your actual secrets (or keep using st.secrets as below).
+# Expect these in .streamlit/secrets.toml
+
 TAVUS_API_KEY    = st.secrets["tavus"]["api_key"]
 TAVUS_PERSONA_ID = st.secrets["tavus"]["persona_id"]
 TAVUS_REPLICA_ID = st.secrets["tavus"]["replica_id"]
@@ -77,7 +78,7 @@ st.markdown(
       .btn-row { display: flex; gap: 10px; width: 100%; margin-top: 2px; }
       .btn-row > div { flex: 1; }
 
-      /* Compact buttons */
+      /* Compact, light-colored buttons */
       .btn-start button, .btn-join button {
         padding: 6px 10px !important;
         font-size: 14px !important;
@@ -106,10 +107,10 @@ st.markdown('<div class="app-wrapper">', unsafe_allow_html=True)
 st.title("Interactive Avatar")
 
 # ===================== Permission popup =====================
-# Shows once until permissions are checked; then it stays hidden.
+# Shows once until permissions are checked; then remains hidden.
 # On click:
-#   1) Requests MIC; if denied => mic=denied, checked=1; reload (buttons stay disabled)
-#   2) If MIC granted, requests CAM; regardless of result => cam=granted|denied, checked=1; reload
+#   1) Ask MIC; if denied => mic=denied, checked=1; reload (buttons disabled)
+#   2) If MIC granted, ask CAM; regardless => cam=granted|denied, checked=1; reload
 permission_popup_html = """
 <div id="perm-modal" style="
   position: fixed; inset: 0; background: rgba(0,0,0,0.5);
@@ -154,21 +155,18 @@ permission_popup_html = """
       }
     }
 
-    // Update the URL query params and reload so Streamlit side can re-render with new state
+    // Update the URL query params and reload so Streamlit picks up state
     const url = new URL(window.location.href);
     url.searchParams.set('mic', mic);
     url.searchParams.set('cam', cam);
     url.searchParams.set('checked', '1');
-
-    // Force a reload (use assign so history keeps one entry)
-    window.location.assign(url.toString());
+    window.location.assign(url.toString());  // ensures a full rerun
   };
 })();
 </script>
 """
 
 if not ss.permission_checked:
-    # Render popup once; it hides itself after user clicks Continue and reloads with params.
     st.components.v1.html(permission_popup_html, height=220)
 
 # ===================== Buttons =====================
@@ -193,7 +191,6 @@ st.markdown('</div>', unsafe_allow_html=True)
 
 # ===================== Start / Join handlers =====================
 if start_clicked:
-    # End any previous session and start fresh
     if ss.get("conv_id"):
         end_conversation(ss["conv_id"])
     try:
@@ -204,7 +201,6 @@ if start_clicked:
         st.error(f"Failed to start: {e}")
 
 if join_clicked and not ss.get("conv_url"):
-    # If Join pressed but no session yet, create one
     try:
         conv_id, conv_url = create_conversation()
         ss["conv_id"], ss["conv_url"] = conv_id, conv_url
@@ -213,11 +209,9 @@ if join_clicked and not ss.get("conv_url"):
         st.error(f"Failed to join: {e}")
 
 # ===================== Video stack =====================
-# Top: Avatar (Tavus) — shown after session exists
-# Bottom: User camera (or black screen if cam not granted)
 st.markdown('<div class="video-stack">', unsafe_allow_html=True)
 
-# Top slot (Avatar)
+# Top: Avatar
 st.markdown('<div class="slot">', unsafe_allow_html=True)
 if ss.get("conv_url"):
     st.components.v1.iframe(ss["conv_url"], height=360, scrolling=False)
@@ -225,7 +219,7 @@ else:
     st.info("Tap Start or Join to begin the session.")
 st.markdown('</div>', unsafe_allow_html=True)
 
-# Bottom slot (User)
+# Bottom: User video (or black)
 st.markdown('<div class="slot" style="margin-top: 10px;">', unsafe_allow_html=True)
 if ss.cam_granted:
     cam_html = """
