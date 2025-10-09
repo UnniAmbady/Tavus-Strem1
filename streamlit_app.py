@@ -4,10 +4,6 @@ from datetime import datetime
 
 # ===================== Config / secrets =====================
 # .streamlit/secrets.toml
-# [tavus]
-# api_key = "..."
-# persona_id = "..."
-# replica_id = "..."
 TAVUS_API_KEY    = st.secrets["tavus"]["api_key"]
 TAVUS_PERSONA_ID = st.secrets["tavus"]["persona_id"]
 TAVUS_REPLICA_ID = st.secrets["tavus"]["replica_id"]
@@ -48,6 +44,7 @@ st.markdown(
     """
     <style>
       .app-wrapper { max-width: 480px; margin: 0 auto; }
+
       .btn-row { display: flex; gap: 10px; width: 100%; margin: 6px 0 10px 0; }
       .btn-row > div { flex: 1; }
       .btn-start button, .btn-join button {
@@ -60,15 +57,15 @@ st.markdown(
       .btn-start button { background: #ffc9c9 !important; color: #7a0000 !important; }  /* light red */
       .btn-join  button { background: #c8f7d0 !important; color: #0c5c2a !important; }  /* light green */
 
-      /* One single video container (Tavus room) */
-      .room {
+      /* Make the iframe look like a card without any black placeholder */
+      .room-frame {
         width: 100%;
-        height: 68vh;          /* single viewport block that fits on phones */
-        max-height: 540px;     /* cap for larger devices */
+        height: 68vh;         /* good on phones; shows full room */
+        max-height: 540px;    /* cap for larger screens */
+        border: 0;
         border-radius: 12px;
-        overflow: hidden;
         box-shadow: 0 4px 14px rgba(0,0,0,0.25);
-        background: #000;      /* just in case iframe loads slowly */
+        overflow: hidden;
       }
 
       @media (max-width: 600px){
@@ -125,13 +122,14 @@ if join_clicked and not ss.get("conv_url"):
         st.error(f"Failed to join: {e}")
 
 # ===================== Single video area (only the Tavus room) =====================
-st.markdown('<div class="room">', unsafe_allow_html=True)
 if ss.get("conv_url"):
-    # The Tavus room already shows both the Avatar and your camera together.
-    st.components.v1.iframe(ss["conv_url"], height=540, scrolling=False)
+    # Render the Tavus room directly, no black background wrapper.
+    st.components.v1.html(
+        f'<iframe src="{ss["conv_url"]}" class="room-frame" allow="camera; microphone; clipboard-read; clipboard-write"></iframe>',
+        height=540,  # matches max-height for stable layout
+    )
 else:
     st.info("Tap Start or Join to begin the session.")
-st.markdown('</div>', unsafe_allow_html=True)
 
 # Optional End button
 if ss.get("conv_id"):
